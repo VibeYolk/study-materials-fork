@@ -2,8 +2,6 @@
 name: HGhub Windows build and scan
 "on":
   workflow_dispatch:
-  push:
-    branches: [codex/windows-scan-build-20261112]
 permissions:
   contents: read
 
