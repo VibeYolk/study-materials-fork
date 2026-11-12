@@ -22,13 +22,13 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y clamav
-          mkdir -p "$RUNNER_TEMP/clamdb"
-          freshclam --config-file=/etc/clamav/freshclam.conf --datadir="$RUNNER_TEMP/clamdb" --log="$RUNNER_TEMP/freshclam.log" --stdout
+          sudo install -d -o clamav -g clamav -m 0755 /tmp/hghub-clamdb
+          sudo freshclam --config-file=/etc/clamav/freshclam.conf --datadir=/tmp/hghub-clamdb --log=/tmp/hghub-freshclam.log --stdout
       - name: Scan checked out source
         shell: bash
         run: |
           set -euo pipefail
-          clamscan --database="$RUNNER_TEMP/clamdb" --recursive --infected --no-summary --exclude-dir='(^|/)\.git(/|$)' .
+          clamscan --database=/tmp/hghub-clamdb --recursive --infected --no-summary --exclude-dir='(^|/)\.git(/|$)' .
           echo 'ClamAV source scan completed without a detection.'
 
   windows:
@@ -83,14 +83,14 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y clamav
-          mkdir -p "$RUNNER_TEMP/clamdb"
-          freshclam --config-file=/etc/clamav/freshclam.conf --datadir="$RUNNER_TEMP/clamdb" --log="$RUNNER_TEMP/freshclam.log" --stdout
+          sudo install -d -o clamav -g clamav -m 0755 /tmp/hghub-clamdb
+          sudo freshclam --config-file=/etc/clamav/freshclam.conf --datadir=/tmp/hghub-clamdb --log=/tmp/hghub-freshclam.log --stdout
       - name: Scan Windows executables
         shell: bash
         run: |
           set -euo pipefail
           test "$(find windows-output -type f -name '*.exe' | wc -l)" -eq 2
-          clamscan --database="$RUNNER_TEMP/clamdb" --recursive --infected --no-summary windows-output
+          clamscan --database=/tmp/hghub-clamdb --recursive --infected --no-summary windows-output
           sha256sum windows-output/*.exe > windows-output/SHA256SUMS.txt
           echo 'ClamAV executable scan completed without a detection.'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -99,4 +99,26 @@ jobs:
           path: windows-output/*
           retention-days: 7
           if-no-files-found: error
+
+  smoke_test:
+    needs: artifact_scan
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-scanned
+          path: windows-output
+      - name: Test that the portable app starts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path 'windows-output/HGhub.exe').Path
+          $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:RUNNER_TEMP 'hghub-webview-test'
+          $proc = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru
+          Start-Sleep -Seconds 10
+          $proc.Refresh()
+          if ($proc.HasExited) { throw "Application exited during startup with code $($proc.ExitCode)" }
+          Stop-Process -Id $proc.Id -Force
+          Write-Output 'Application remained running for 10 seconds.'
 
